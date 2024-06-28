@@ -34,7 +34,7 @@ var verbose bool
 var rootCmd = &cobra.Command{
 	Use:   "sec-check",
 	Short: "A tool for checking ECH and Kyber support in domains",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(0),
 	Run: func(cmd *cobra.Command, args []string) {
 		logLevel := slog.LevelInfo
 		if verbose {
@@ -46,7 +46,7 @@ var rootCmd = &cobra.Command{
 		var domains []string
 		var err error
 		if domainsCsvPath != "" {
-			domains, err = pkg.FetchPopularDomainsFromFile(domainsCsvPath, 100)
+			domains, err = pkg.FetchPopularDomainsFromFile(domainsCsvPath, 10000)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
