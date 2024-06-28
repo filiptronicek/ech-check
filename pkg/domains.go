@@ -38,7 +38,7 @@ func FetchPopularDomainsFromFile(filePath string, limit int) ([]string, error) {
 			}
 			return nil, fmt.Errorf("failed to read record: %w", err)
 		}
-		domains = append(domains, record[1])
+		domains = append(domains, record[0])
 		count++
 	}
 
