@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"log/slog"
@@ -21,18 +20,7 @@ type DomainResult struct {
 
 // CheckKyberSupport checks if the domain supports Kyber and/or ECH.
 func CheckKyberSupport(domain string) (error, DomainResult) {
-	var usedKex tls.CurveID
-	req, err := http.NewRequestWithContext(
-		context.WithValue(
-			context.Background(),
-			tls.CFEventHandlerContextKey{},
-			func(ev tls.CFEvent) {
-				switch e := ev.(type) {
-				case tls.CFEventTLS13NegotiatedKEX:
-					usedKex = e.KEX
-				}
-			},
-		),
+	req, err := http.NewRequest(
 		"GET",
 		"https://"+domain,
 		nil,
@@ -67,14 +55,13 @@ func CheckKyberSupport(domain string) (error, DomainResult) {
 	m.SetQuestion(dns.Fqdn(domain), dns.TypeHTTPS)
 	m.RecursionDesired = true
 
-	var echConfigList []tls.ECHConfig
-	useECH := false
+	var echConfigList []byte
 
 	r, _, err := c.Exchange(m, net.JoinHostPort(config.Servers[0], config.Port))
 	if r == nil {
-		slog.Warn("DNS: error: %s\n", err.Error())
+		slog.Warn("DNS error", "err", err)
 	} else if r.Rcode != dns.RcodeSuccess {
-		slog.Warn("DNS: invalid answer name %s after MX query for %s\n", domain, domain)
+		slog.Warn("DNS invalid answer", "domain", domain, "rcode", r.Rcode)
 	} else {
 		for _, a := range r.Answer {
 			if a.Header().Rrtype == dns.TypeHTTPS {
@@ -85,18 +72,11 @@ func CheckKyberSupport(domain string) (error, DomainResult) {
 					break
 				}
 
-				slog.Debug("ECH Value:", echValue)
+				slog.Debug("ECH Value", "value", echValue)
 				echConfigListBase64 := echValue
-				useECH = true
-				echConfigListBtyes, err := base64.StdEncoding.DecodeString(echConfigListBase64)
+				echConfigList, err = base64.StdEncoding.DecodeString(echConfigListBase64)
 				if err != nil {
 					slog.Error("Failed to decode ECH config", "err", err)
-					break
-				}
-
-				echConfigList, err = tls.UnmarshalECHConfigs(echConfigListBtyes)
-				if err != nil {
-					slog.Error("Failed to unmarshal ECH config", "err", err)
 					break
 				}
 
@@ -105,25 +85,44 @@ func CheckKyberSupport(domain string) (error, DomainResult) {
 		}
 	}
 
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
-		CurvePreferences: []tls.CurveID{tls.X25519Kyber768Draft00, tls.X25519Kyber512Draft00, tls.X25519, tls.CurveP256, tls.CurveP384, tls.CurveP521},
-		ECHEnabled:       useECH,
-		ClientECHConfigs: echConfigList,
+	tlsConfig := &tls.Config{
+		CurvePreferences:               []tls.CurveID{tls.X25519MLKEM768, tls.X25519, tls.CurveP256, tls.CurveP384, tls.CurveP521},
+		EncryptedClientHelloConfigList: echConfigList,
 	}
 
-	if _, err = (&http.Client{Timeout: 5 * time.Second}).Do(req); err != nil {
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
 		return err, DomainResult{
 			Domain:     domain,
-			HasECH:     useECH,
+			HasECH:     false,
 			HasKyber:   false,
 			Accessible: false,
+		}
+	}
+	defer resp.Body.Close()
+
+	// Get the connection state to check what was negotiated
+	if resp.TLS != nil {
+		usedKex := resp.TLS.CurveID
+		return nil, DomainResult{
+			Domain:     domain,
+			HasECH:     resp.TLS.ECHAccepted,
+			HasKyber:   usedKex == tls.X25519MLKEM768,
+			Accessible: true,
 		}
 	}
 
 	return nil, DomainResult{
 		Domain:     domain,
-		HasECH:     useECH,
-		HasKyber:   usedKex == tls.X25519Kyber768Draft00 || usedKex == tls.X25519Kyber512Draft00,
+		HasECH:     false,
+		HasKyber:   false,
 		Accessible: true,
 	}
 }

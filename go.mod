@@ -1,6 +1,6 @@
 module github.com/filiptronicek/ech
 
-go 1.22.4
+go 1.25.0
 
 require (
 	github.com/miekg/dns v1.1.61

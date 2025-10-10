@@ -61,7 +61,7 @@ var rootCmd = &cobra.Command{
 		for _, domain := range domains {
 			err, result := pkg.CheckKyberSupport(domain)
 			if err != nil {
-				fmt.Printf(domain + " not accessible\n")
+				fmt.Printf("%s not accessible\n", domain)
 				continue
 			}
 
